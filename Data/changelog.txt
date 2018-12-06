@@ -1,28 +1,52 @@
-V5.3.7 (May 31st, 2018):
+V5.5.6 (November 14th, 2018):
 ▔▔▔▔▔▔▔▔▔▔▔
 Manager App:
- • ADDED: New Storage App to help eliminate State Size issues (It's not storing any data yet)
- • ADDED: Maintenance Commands can now be run from the Diagnostics Web Interface (More Commands to Come)
- • FIXED: Converted degree symbols to unicode
- • FIXED: Bug fixes and Code Cleanups
+ • Enabled Echo Speaks device support for Voice Notifications
+ • FIXED: Bug Fixes
 
-Automation App 5.3.4:
-• FIXED: Converted degree symbols to unicode
-• FIXED: Code Cleanups and State Usage Reductions
+Automation App 5.4.7:
+ • FIXED: Bug Fixes
 
-V5.3.6 (May 8th, 2018):
+V5.5.2 (September 9th, 2018):
 ▔▔▔▔▔▔▔▔▔▔▔
 Manager App:
- • FIXED: State Cleanup optimizations to help prevent Max State Size errors
+ • Enabled new camera options
+ • FIXED: Bug Fixes
 
-V5.3.2 (January 11th, 2018):
+Automation App 5.4.5:
+ • FIXED: Bug Fixes
+
+V5.5.1 (September 8th, 2018):
 ▔▔▔▔▔▔▔▔▔▔▔
 Manager App:
- • FIXED: Lot's of bug fixes and optimizations
- • FIXED: Remote diag logging
- • UPDATED: Will remove un-needed or broken automations
- • ADDED: New Lite Install Mode (No Watchdog or Automations)
- • ADDED: Add Web UI for all of the Devices
+ • FIXED: Bug Fixes
 
-Automation App 5.3.1:
-• FIXED: More Cleanups and Bug fixes
+Automation App 5.4.4:
+ • FIXED: Bug Fixes
+
+V5.5.0 (August 28th, 2018):
+▔▔▔▔▔▔▔▔▔▔▔
+Manager App:
+ • UPDATED: NST Streaming is now communicates via local network (when enabled)
+ • FIXED: Bug Fixes
+
+Automation App 5.4.3:
+ • FIXED: Bug Fixes
+
+V5.4.0 (August 10th, 2018):
+▔▔▔▔▔▔▔▔▔▔▔
+Manager App:
+ • ADDED: Pushover Manager Integration
+
+Automation App 5.4.0:
+ • ADDED: Pushover Manager Integration
+
+V5.3.9 (July 30th, 2018):
+▔▔▔▔▔▔▔▔▔▔▔
+Manager App:
+ • ADDED: Camera Motion Zone Filtering (Requires Nest Aware and NST Streaming Service)
+ • FIXED: Bug fixes and Code Cleanups/Optimizations
+
+Automation App 5.3.6:
+• REMOVED: Support for Contact Book
+

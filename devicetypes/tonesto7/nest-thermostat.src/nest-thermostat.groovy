@@ -13,22 +13,16 @@
 import java.text.SimpleDateFormat
 import groovy.time.*
 
-def devVer() { return "5.3.5" }
+def devVer() { return "5.4.3" }
 
 // for the UI
 metadata {
-	definition (name: "${textDevName()}", namespace: "tonesto7", author: "Anthony S.") {
+	definition (name: "${textDevName()}", namespace: "tonesto7", author: "Anthony S.", vid: "SmartThings-smartthings-Z-Wave_Thermostat") {
 		capability "Actuator"
 		capability "Relative Humidity Measurement"
 		capability "Refresh"
 		capability "Sensor"
 		capability "Thermostat"
-		//capability "Thermostat Cooling Setpoint"
-		//capability "Thermostat Fan Mode"
-		//capability "Thermostat Heating Setpoint"
-		//capability "Thermostat Mode"
-		//capability "Thermostat Operating State"
-		//capability "Thermostat Setpoint"
 		capability "Temperature Measurement"
 		capability "Health Check"
 
@@ -105,6 +99,7 @@ metadata {
 		attribute "whoMadeChangesDesc", "string"
 		attribute "whoMadeChangesDescDt", "string"
 		attribute "whoSetEcoMode", "string"
+		attribute "temperatureur", "string"
 	}
 
 	simulator {
@@ -114,20 +109,20 @@ metadata {
 	tiles(scale: 2) {
 		multiAttributeTile(name:"temperature", type:"thermostat", width:6, height:4, canChangeIcon: true) {
 			tileAttribute("device.temperature", key: "PRIMARY_CONTROL") {
-				attributeState("default", label:'${currentValue}\u00b0')
+				attributeState("temperature", label:'${currentValue}\u00b0')
 			}
 			tileAttribute("device.temperature", key: "VALUE_CONTROL") {
-				attributeState("default", action: "levelUpDown")
+				// attributeState("default", action: "levelUpDown")
 				attributeState("VALUE_UP", action: "levelUp")
 				attributeState("VALUE_DOWN", action: "levelDown")
 			}
 			tileAttribute("device.humidity", key: "SECONDARY_CONTROL") {
-				attributeState("default", label:'${currentValue}%', unit:"%")
+				attributeState("humidity", label:'${currentValue}%', unit:"%", defaultState: true)
 			}
 			tileAttribute("device.thermostatOperatingState", key: "OPERATING_STATE") {
 				attributeState("idle",			backgroundColor:"#44B621")
-				attributeState("heating",		 backgroundColor:"#FFA81E")
-				attributeState("cooling",		 backgroundColor:"#2ABBF0")
+				attributeState("heating",		 backgroundColor:"#e86d13")
+				attributeState("cooling",		 backgroundColor:"#00a0dc")
 				attributeState("fan only",		  backgroundColor:"#145D78")
 				attributeState("pending heat",	  backgroundColor:"#B27515")
 				attributeState("pending cool",	  backgroundColor:"#197090")
@@ -285,30 +280,24 @@ def compileForC() {
 
 def getTempColors() {
 	def colorMap
-//getTemperatureScale() == "C"   wantMetric()
-	if(compileForC()) {
 		colorMap = [
 			// Celsius Color Range
 			[value: 0, color: "#153591"],
 			[value: 7, color: "#1e9cbb"],
 			[value: 15, color: "#90d2a7"],
 			[value: 23, color: "#44b621"],
-			[value: 29, color: "#f1d801"],
-			[value: 33, color: "#d04e00"],
-			[value: 36, color: "#bc2323"]
-			]
-	} else {
-		colorMap = [
+			[value: 28, color: "#f1d801"],
+			[value: 35, color: "#d04e00"],
+			[value: 37, color: "#bc2323"],
 			// Fahrenheit Color Range
 			[value: 40, color: "#153591"],
 			[value: 44, color: "#1e9cbb"],
 			[value: 59, color: "#90d2a7"],
 			[value: 74, color: "#44b621"],
 			[value: 84, color: "#f1d801"],
-			[value: 92, color: "#d04e00"],
+			[value: 95, color: "#d04e00"],
 			[value: 96, color: "#bc2323"]
 		]
-	}
 }
 
 def lowRange() { return compileForC() ? 9 : 50 }
@@ -335,10 +324,19 @@ void checkStateClear() {
 		Logger("checkStateClear...resetting ALL toggle")
 		state.resetAllData = false
 	}
+	if(before > 65) {
+		Logger("checkStateClear...Clearing HISTORY ${before}")
+		def data = getState()?.findAll {
+			(it?.key in ["today", "temperatureTable", "operatingStateTable", "humidityTable", "coolSetpointTable", "heatSetpointTable", "extTempTable", "fanModeTable", "historyStoreMap", "temperatureTableYesterday", "operatingStateTableYesterday", "humidityTableYesterday", "coolSetpointTableYesterday", "heatSetpointTableYesterday", "extTempTableYesterday", "fanModeTableYesterday" ])
+		}
+		data.each { item ->
+			state.remove(item?.key.toString())
+		}
+	}
 	if(!state?.resetHistoryOnly && resetHistoryOnly) {
 		Logger("checkStateClear...Clearing HISTORY")
 		def data = getState()?.findAll {
-			(it?.key in ["today", "temperatureTable", "operatingStateTable", "humidityTable", "historyStoreMap", "temperatureTableYesterday", "operatingStateTableYesterday", "humidityTableYesterday"])
+			(it?.key in ["today", "temperatureTable", "operatingStateTable", "humidityTable", "coolSetpointTable", "heatSetpointTable", "extTempTable", "fanModeTable", "historyStoreMap", "temperatureTableYesterday", "operatingStateTableYesterday", "humidityTableYesterday", "coolSetpointTableYesterday", "heatSetpointTableYesterday", "extTempTableYesterday", "fanModeTableYesterday" ])
 		}
 		data.each { item ->
 			state.remove(item?.key.toString())
@@ -395,7 +393,7 @@ def useTrackedHealth() { return state?.useTrackedHealth ?: false }
 
 def getHcTimeout() {
 	def to = state?.hcTimeout
-	return ((to instanceof Integer) ? to.toInteger() : 35)*60
+	return ((to instanceof Integer) ? to.toInteger() : 45)*60
 }
 
 void verifyHC() {
@@ -422,9 +420,7 @@ def modifyDeviceStatus(status) {
 
 def ping() {
 	Logger("ping...")
-//	if(useTrackedHealth()) {
-		keepAwakeEvent()
-//	}
+	keepAwakeEvent()
 }
 
 def keepAwakeEvent() {
@@ -483,7 +479,7 @@ void processEvent(data) {
 	checkStateClear()
 
 	//LogAction("processEvent Parsing data ${eventData}", "trace")
-	try {
+//	try {
 		LogAction("------------START OF API RESULTS DATA------------", "warn")
 		if(eventData) {
 			state.isBeta = eventData?.isBeta == true ? true : false
@@ -492,18 +488,17 @@ void processEvent(data) {
 			state.useMilitaryTime = eventData?.mt ? true : false
 			state.showLogNamePrefix = eventData?.logPrefix == true ? true : false
 			state.enRemDiagLogging = eventData?.enRemDiagLogging == true ? true : false
-			state.healthMsg = eventData?.healthNotify == true ? true : false
+			state.healthMsg = eventData?.healthNotify?.healthMsg == true ? true : false
+			state.healthMsgWait = eventData?.healthNotify?.healthMsgWait
 			state.showGraphs = eventData?.showGraphs != null ? eventData?.showGraphs : true
-			if(eventData?.allowDbException) { state?.allowDbException = eventData?.allowDbException = false ? false : true }
+			if(eventData?.allowDbException) { state?.allowDbException = eventData?.allowDbException == false ? false : true }
 			debugOnEvent(eventData?.debug ? true : false)
 			deviceVerEvent(eventData?.latestVer.toString())
 			if(virtType()) { nestTypeEvent("virtual") } else { nestTypeEvent("physical") }
-//			if(useTrackedHealth()) {
-				if(eventData.hcTimeout && (state?.hcTimeout != eventData?.hcTimeout || !state?.hcTimeout)) {
-					state.hcTimeout = eventData?.hcTimeout
-					verifyHC()
-				}
-//			}
+			if(eventData.hcTimeout && (state?.hcTimeout != eventData?.hcTimeout || !state?.hcTimeout)) {
+				state.hcTimeout = eventData?.hcTimeout
+				verifyHC()
+			}
 			if(state?.swVersion != devVer()) {
 				initialize()
 				state.swVersion = devVer()
@@ -543,7 +538,6 @@ void processEvent(data) {
 			softwareVerEvent(eventData?.data?.software_version.toString())
 			//onlineStatusEvent(eventData?.data?.is_online.toString())
 			apiStatusEvent(eventData?.apiIssues)
-			if(eventData?.htmlInfo) { state?.htmlInfo = eventData?.htmlInfo }
 			safetyTempsEvent(eventData?.safetyTemps)
 			comfortHumidityEvent(eventData?.comfortHumidity)
 			comfortDewpointEvent(eventData?.comfortDewpoint)
@@ -660,15 +654,17 @@ void processEvent(data) {
 		//This will return all of the devices state data to the logs.
 		//LogAction("Device State Data: ${getState()}")
 		return null
+/*
 	}
 	catch (ex) {
 		log.error "generateEvent Exception:", ex
-		exceptionDataHandler(ex.message, "generateEvent")
+		exceptionDataHandler(ex?.message, "generateEvent")
 	}
+*/
 }
 
 def getStateSize()	{ return state?.toString().length() }
-def getStateSizePerc()  { return (int) ((stateSize/100000)*100).toDouble().round(0) } //
+def getStateSizePerc()  { return (int) ((stateSize/100000)*100).toDouble().round(0) }
 
 def getDataByName(String name) {
 	state[name] ?: device.getDataValue(name)
@@ -810,7 +806,6 @@ def lastCheckinEvent(checkin, isOnline) {
 	tf.setTimeZone(getTimeZone())
 
 	def lastChk = device.currentState("lastConnection")?.value
-	def lastConnSeconds = (lastChk && lastChk != "Not Available") ? getTimeDiffSeconds(lastChk) : 3000
 	def prevOnlineStat = device.currentState("onlineStatus")?.value
 
 	def hcTimeout = getHcTimeout()
@@ -826,11 +821,15 @@ def lastCheckinEvent(checkin, isOnline) {
 		sendEvent(name: 'lastConnection', value: curConnFmt?.toString(), isStateChange: true)
 	} else { LogAction("Last Nest Check-in was: (${curConnFmt}) | Original State: (${lastChk})") }
 
-	LogAction("lastCheckinEvent($checkin, $isOnline) | onlineStatus: $onlineStat | lastConnSeconds: $lastConnSeconds | hcTimeout: ${hcTimeout} | curConnSeconds: ${curConnSeconds}")
+	lastChk = device.currentState("lastConnection")?.value
+	def lastConnSeconds = (lastChk && lastChk != "Not Available") ? getTimeDiffSeconds(lastChk) : 3000
 
 	if(hcTimeout && isOnline.toString() == "true" && curConnSeconds > hcTimeout && lastConnSeconds > hcTimeout) {
 		onlineStat = "offline"
 		LogAction("lastCheckinEvent: UPDATED onlineStatus: $onlineStat")
+		Logger("lastCheckinEvent($checkin, $isOnline) | onlineStatus: $onlineStat | lastConnSeconds: $lastConnSeconds | hcTimeout: ${hcTimeout} | curConnSeconds: ${curConnSeconds}")
+	} else {
+		LogAction("lastCheckinEvent($checkin, $isOnline) | onlineStatus: $onlineStat | lastConnSeconds: $lastConnSeconds | hcTimeout: ${hcTimeout} | curConnSeconds: ${curConnSeconds}")
 	}
 
 	state?.onlineStatus = onlineStat
@@ -913,10 +912,14 @@ def thermostatSetpointEvent(Double targetTemp) {
 def temperatureEvent(Double tempVal) {
 	def temp = device.currentState("temperature")?.stringValue
 	def rTempVal = wantMetric() ? tempVal.round(1) : tempVal.round(0).toInteger()
+	def unrounded_rTempVal = tempVal.round(1)
 	if(isStateChange(device, "temperature", rTempVal.toString())) {
 		LogAction("UPDATED | Temperature is (${rTempVal}${tUnitStr()}) | Original Temp: (${temp}${tUnitStr()})")
 		sendEvent(name:'temperature', value: rTempVal, unit: state?.tempUnit, descriptionText: "Ambient Temperature is ${rTempVal}${tUnitStr()}", displayed: true, isStateChange: true)
 	} else { LogAction("Temperature is (${rTempVal}${tUnitStr()}) | Original Temp: (${temp})${tUnitStr()}") }
+	if(isStateChange(device, "temperatureur", unrounded_rTempVal.toString())) {
+		sendEvent(name:'temperatureur', value: unrounded_rTempVal, unit: state?.tempUnit, descriptionText: "Ambient Temperature is ${rTempVal}${tUnitStr()}", displayed: false, isStateChange: true)
+	}
 	checkSafetyTemps()
 }
 
@@ -1058,7 +1061,8 @@ void whoMadeChanges(autoType, desc, dt) {
 def ecoDescEvent(val, updChk=false) {
 	//log.debug "ecoDescEvent($val)"
 	def curMode = device?.currentState("nestThermostatMode")?.stringValue
-	def curEcoDesc = device?.currentState("whoSetEcoMode")?.value ?: null
+	def t0 = device?.currentState("whoSetEcoMode")?.value
+	def curEcoDesc = t0 ?: null
 
 	def newVal = updChk ? curEcoDesc : val
 	def newEcoDesc = (curMode == "eco") ? (newVal == null ? "Set Outside of this DTH" : newVal) : "Not in Eco Mode"
@@ -1077,15 +1081,17 @@ def ecoDescEvent(val, updChk=false) {
 def hvacModeEvent(mode) {
 	def hvacMode = !state?.hvac_mode ? device.currentState("thermostatMode")?.stringValue : state.hvac_mode
 	def newMode = (mode == "heat-cool") ? "auto" : mode
+/*
 	if(mode == "eco") {
 		if(state?.can_cool && state?.can_heat) { newMode = "auto" }
 		else if(state?.can_heat) { newMode = "heat" }
 		else if(state?.can_cool) { newMode = "cool" }
 	}
+*/
 	state?.hvac_mode = newMode
 	if(!hvacMode.equals(newMode)) {
 		Logger("UPDATED | Hvac Mode is (${newMode.toString().capitalize()}) | Original State: (${hvacMode.toString().capitalize()})")
-		sendEvent(name: "thermostatMode", value: newMode, descriptionText: "HVAC mode is ${newMode} mode", displayed: true, isStateChange: true)
+		sendEvent(name: "thermostatMode", value: newMode, data:[supportedThermostatModes: device.currentValue("supportedThermostatModes")], descriptionText: "HVAC mode is ${newMode} mode", displayed: true, isStateChange: true)
 	}
 
 	def oldnestmode = state?.nestHvac_mode
@@ -1281,7 +1287,7 @@ def autoSchedDataEvent(schedData) {
 }
 
 def canHeatCool(canHeat, canCool) {
-	def supportedThermostatModes = ["off"]
+	def supportedThermostatModes = ["off", "eco"]
 	state?.can_heat = !canHeat ? false : true
 	if(state.can_heat) { supportedThermostatModes << "heat" }
 	state?.can_cool = !canCool ? false : true
@@ -1303,7 +1309,7 @@ def canHeatCool(canHeat, canCool) {
 	}
 
 	def nestSupportedThermostatModes = supportedThermostatModes.collect()
-	nestSupportedThermostatModes << "eco"
+	//nestSupportedThermostatModes << "eco"
 	if(state?.supportedNestThermostatModes != nestSupportedThermostatModes) {
 		sendEvent(name: "supportedNestThermostatModes", value: nestSupportedThermostatModes)
 		state.supportedNestThermostatModes = nestSupportedThermostatModes.collect()
@@ -1405,7 +1411,8 @@ def healthNotifyOk() {
 	def lastDt = state?.lastHealthNotifyDt
 	if(lastDt) {
 		def ldtSec = getTimeDiffSeconds(lastDt)
-		if(ldtSec < 600) {
+		def t0 = state.healthMsgWait ?: 3600
+		if(ldtSec < t0) {
 			return false
 		}
 	}
@@ -1623,7 +1630,7 @@ def GetTimeDiffSeconds(lastDate) {
 	def lastDt = Date.parse("E MMM dd HH:mm:ss z yyyy", lastDate)
 	def start = Date.parse("E MMM dd HH:mm:ss z yyyy", formatDt(lastDt)).getTime()
 	def stop = Date.parse("E MMM dd HH:mm:ss z yyyy", formatDt(now)).getTime()
-	def diff = (int) (long) (stop - start) / 1000 //
+	def diff = (int) (long) (stop - start) / 1000
 	return diff
 }
 
@@ -1637,7 +1644,7 @@ def getTimeDiffSeconds(strtDate, stpDate=null, methName=null) {
 		def stopDt = Date.parse("E MMM dd HH:mm:ss z yyyy", stopVal)
 		def start = Date.parse("E MMM dd HH:mm:ss z yyyy", formatDt(startDt)).getTime()
 		def stop = Date.parse("E MMM dd HH:mm:ss z yyyy", stopVal).getTime()
-		def diff = (int) (long) (stop - start) / 1000 //
+		def diff = (int) (long) (stop - start) / 1000
 		//LogTrace("[GetTimeDiffSeconds] Results for '$methName': ($diff seconds)")
 		return diff
 	} else { return null }
@@ -1733,11 +1740,14 @@ void changeSetpoint() {
 
 // Nest Only allows F temperatures as #.0  and C temperatures as either #.0 or #.5
 void setHeatingSetpoint(temp, manChg=false) {
-	setHeatingSetpoint(temp.toDouble(), manChg)
+	if(temp != null) {
+		setHeatingSetpoint(temp.toDouble(), manChg)
+	}
 }
 
 void setHeatingSetpoint(Double reqtemp, manChg=false) {
 	LogAction("setHeatingSetpoint()... ($reqtemp)", "trace")
+	if(reqtemp == null) { return }
 	def hvacMode = getHvacMode()
 	def tempUnit = state?.tempUnit
 	def temp = 0.0
@@ -1755,7 +1765,7 @@ void setHeatingSetpoint(Double reqtemp, manChg=false) {
 	if(canHeat && state?.nestHvac_mode != "eco") {
 		switch (tempUnit) {
 			case "C":
-				temp = Math.round(reqtemp.round(1) * 2) / 2.0f //
+				temp = Math.round(reqtemp.round(1) * 2) / 2.0f
 				if(curMinTemp < 9.0) { curMinTemp = 9.0 }
 				if(curMaxTemp > 32.0) { curMaxTemp = 32.0 }
 				if(temp) {
@@ -1808,11 +1818,14 @@ void setHeatingSetpoint(Double reqtemp, manChg=false) {
 }
 
 void setCoolingSetpoint(temp, manChg=false) {
-	setCoolingSetpoint( temp.toDouble(), manChg)
+	if(temp != null) {
+		setCoolingSetpoint( temp.toDouble(), manChg)
+	}
 }
 
 void setCoolingSetpoint(Double reqtemp, manChg=false) {
 	LogAction("setCoolingSetpoint()... ($reqtemp)", "trace")
+	if(reqtemp == null) { return }
 	def hvacMode = getHvacMode()
 	def temp = 0.0
 	def tempUnit = state?.tempUnit
@@ -1830,7 +1843,7 @@ void setCoolingSetpoint(Double reqtemp, manChg=false) {
 	if(canCool && state?.nestHvac_mode != "eco") {
 		switch (tempUnit) {
 			case "C":
-				temp = Math.round(reqtemp.round(1) * 2) / 2.0f //
+				temp = Math.round(reqtemp.round(1) * 2) / 2.0f
 				if(curMinTemp < 9.0) { curMinTemp = 9.0 }
 				if(curMaxTemp > 32.0) { curMaxTemp = 32.0 }
 				if(temp) {
@@ -2122,7 +2135,7 @@ void fanOn() {
 	}
 	catch (ex) {
 		log.error "fanOn Exception:", ex
-		exceptionDataHandler(ex.message, "fanOn")
+		exceptionDataHandler(ex?.message, "fanOn")
 	}
 }
 
@@ -2146,7 +2159,7 @@ void fanAuto() {
 	}
 	catch (ex) {
 		log.error "fanAuto Exception:", ex
-		exceptionDataHandler(ex.message, "fanAuto")
+		exceptionDataHandler(ex?.message, "fanAuto")
 	}
 }
 
@@ -2243,77 +2256,38 @@ def exceptionDataHandler(msg, methodName) {
 
 def getFileBase64(url, preType, fileType) {
 	try {
-		def params = [
-			uri: url,
-			contentType: '$preType/$fileType'
-		]
+		def params = [uri: url, contentType: "$preType/$fileType"]
 		httpGet(params) { resp ->
-			if(resp.data) {
-				def respData = resp?.data
-				ByteArrayOutputStream bos = new ByteArrayOutputStream()
-				int len
-				int size = 4096
-				byte[] buf = new byte[size]
-				while ((len = respData.read(buf, 0, size)) != -1)
-					bos.write(buf, 0, len)
-				buf = bos.toByteArray()
-				//LogAction("buf: $buf")
-				String s = buf?.encodeBase64()
-				//LogAction("resp: ${s}")
-				return s ? "data:${preType}/${fileType};base64,${s.toString()}" : null
+			if(resp?.status == 200) {
+				if(resp.data) {
+					def respData = resp?.data
+					byte[] byteData = resp?.data?.getBytes()
+					String enc = byteData?.encodeBase64()
+					// log.debug "enc: ${enc}"
+					return enc ? "data:${preType}/${fileType};base64,${enc?.toString()}" : null
+				}
+			} else {
+				LogAction("getFileBase64 Resp: ${resp?.status} ${url}", "error")
+				exceptionDataHandler("resp ${ex?.response?.status} ${url}", "getFileBase64")
+				return null
 			}
 		}
-	}
-	catch (ex) {
-		log.error "getFileBase64 Exception:", ex
-		exceptionDataHandler(ex.message, "getFileBase64")
-	}
-}
-
-def getCssData() {
-	def cssData = null
-	def htmlInfo = state?.htmlInfo
-	if(htmlInfo?.cssUrl && htmlInfo?.cssVer) {
-		cssData = getFileBase64(htmlInfo.cssUrl, "text", "css")
-		state?.cssVer = htmlInfo?.cssVer
-	} else {
-		cssData = getFileBase64(cssUrl(), "text", "css")
-	}
-	return cssData
-}
-
-def getChartJsData() {
-	def chartJsData = null
-	//def htmlInfo = state?.htmlInfo
-	def htmlInfo
-	state.chartJsData = null
-
-	if(htmlInfo?.chartJsUrl && htmlInfo?.chartJsVer) {
-		if(state?.chartJsData) {
-			if(state?.chartJsVer?.toInteger() == htmlInfo?.chartJsVer?.toInteger()) {
-				//LogAction("getChartJsData: Chart Javascript Data is Current | Loading Data from State...")
-				chartJsData = state?.chartJsData
-			} else if(state?.chartJsVer?.toInteger() < htmlInfo?.chartJsVer?.toInteger()) {
-				//LogAction("getChartJsData: Chart Javascript Data is Outdated | Loading Data from Source...")
-				//chartJsData = getFileBase64(htmlInfo.chartJsUrl, "text", "javascript")
-				state.chartJsData = chartJsData
-				state?.chartJsVer = htmlInfo?.chartJsVer
+	} catch (ex) {
+		if(ex instanceof groovyx.net.http.ResponseParseException) {
+			if(ex?.statusCode != 200) {
+				LogAction("getFileBase64 Resp: ${ex?.statusCode} ${url}", "error")
+				log.error "getFileBase64 Exception:", ex
 			}
+		} else if(ex instanceof groovyx.net.http.HttpResponseException && ex?.response) {
+			LogAction("getFileBase64 Resp: ${ex?.response?.status} ${url}", "error")
+			exceptionDataHandler("${ex?.response?.status} ${url}", "getFileBase64")
 		} else {
-			//LogAction("getChartJsData: Chart Javascript Data is Missing | Loading Data from Source...")
-			chartJsData = getFileBase64(htmlInfo.chartJsUrl, "text", "javascript")
-			state?.chartJsData = chartJsData
-			state?.chartJsVer = htmlInfo?.chartJsVer
+			log.error "getFileBase64 Exception:", ex
+			exceptionDataHandler(ex, "getFileBase64")
 		}
-	} else {
-		//LogAction("getChartJsData: No Stored Chart Javascript Data Found for Device... Loading for Static URL...")
-		chartJsData = getFileBase64(chartJsUrl(), "text", "javascript")
-	}
-	return chartJsData
+		return null
+    }
 }
-
-def cssUrl()	 { return "https://raw.githubusercontent.com/tonesto7/nest-manager/master/Documents/css/ST-HTML.min.css" }
-def chartJsUrl() { return "https://www.gstatic.com/charts/loader.js" }
 
 def getImg(imgName) { return imgName ? "https://cdn.rawgit.com/tonesto7/nest-manager/master/Images/Devices/$imgName" : "" }
 
@@ -2586,7 +2560,7 @@ void getSomeData(devpoll = false) {
 
 // hackery to test getting old data
 	def tryNum = 2
-	if(state.eric != tryNum ) {
+	if(state?.eric != tryNum ) {
 		if(devpoll) {
 			runIn( 33, "getSomeData", [overwrite: true])
 			return
@@ -2761,101 +2735,108 @@ def updateOperatingHistory(today) {
 	}
 
 	if(dayChange) {
-		def Op_coolingusage = getSumUsage(state.operatingStateTableYesterday, "cooling").toInteger()
-		def Op_heatingusage = getSumUsage(state.operatingStateTableYesterday, "heating").toInteger()
-		def Op_idle = getSumUsage(state.operatingStateTableYesterday, "idle").toInteger()
-		def Op_fanonly = getSumUsage(state.operatingStateTableYesterday, "fan only").toInteger()
-		def fan_on = getSumUsage(state.fanModeTableYesterday, "on").toInteger()
-		def fan_auto = getSumUsage(state.fanModeTableYesterday, "auto").toInteger()
+		try {
+			long Op_coolingusage = getSumUsage(state.operatingStateTableYesterday, "cooling")
+			long Op_heatingusage = getSumUsage(state.operatingStateTableYesterday, "heating")
+			long Op_idle = getSumUsage(state.operatingStateTableYesterday, "idle")
+			long Op_fanonly = getSumUsage(state.operatingStateTableYesterday, "fan only")
+			long fan_on = getSumUsage(state.fanModeTableYesterday, "on")
+			long fan_auto = getSumUsage(state.fanModeTableYesterday, "auto")
 
-		log.info "fanon ${fan_on}  fanauto: ${fan_auto} opidle: ${Op_idle}  cool: ${Op_coolingusage} heat: ${Op_heatingusage} fanonly: ${Op_fanonly}"
+			log.info "fanon ${fan_on}  fanauto: ${fan_auto} opidle: ${Op_idle}  cool: ${Op_coolingusage} heat: ${Op_heatingusage} fanonly: ${Op_fanonly}"
 
-		hm."OperatingState_Day${hm.currentDay}_cooling" = Op_coolingusage
-		hm."OperatingState_Day${hm.currentDay}_heating" = Op_heatingusage
-		hm."OperatingState_Day${hm.currentDay}_idle" = Op_idle
-		hm."OperatingState_Day${hm.currentDay}_fanonly" = Op_fanonly
-		hm."FanMode_Day${hm.currentDay}_On" = fan_on
-		hm."FanMode_Day${hm.currentDay}_auto" = fan_auto
+			hm."OperatingState_Day${hm.currentDay}_cooling" = Op_coolingusage
+			hm."OperatingState_Day${hm.currentDay}_heating" = Op_heatingusage
+			hm."OperatingState_Day${hm.currentDay}_idle" = Op_idle
+			hm."OperatingState_Day${hm.currentDay}_fanonly" = Op_fanonly
+			hm."FanMode_Day${hm.currentDay}_On" = fan_on
+			hm."FanMode_Day${hm.currentDay}_auto" = fan_auto
 
-		hm.currentDay = dayNum
-		hm.OperatingState_DayWeekago_cooling = hm."OperatingState_Day${hm.currentDay}_cooling"
-		hm.OperatingState_DayWeekago_heating = hm."OperatingState_Day${hm.currentDay}_heating"
-		hm.OperatingState_DayWeekago_idle = hm."OperatingState_Day${hm.currentDay}_idle"
-		hm.OperatingState_DayWeekago_fanonly = hm."OperatingState_Day${hm.currentDay}_fanonly"
-		hm.FanMode_DayWeekago_On = hm."FanMode_Day${hm.currentDay}_On"
-		hm.FanMode_DayWeekago_auto = hm."FanMode_Day${hm.currentDay}_auto"
-		hm."OperatingState_Day${hm.currentDay}_cooling" = 0L
-		hm."OperatingState_Day${hm.currentDay}_heating" = 0L
-		hm."OperatingState_Day${hm.currentDay}_idle" = 0L
-		hm."OperatingState_Day${hm.currentDay}_fanonly" = 0L
-		hm."FanMode_Day${hm.currentDay}_On" = 0L
-		hm."FanMode_Day${hm.currentDay}_auto" = 0L
+			hm.currentDay = dayNum
+			hm.OperatingState_DayWeekago_cooling = hm."OperatingState_Day${hm.currentDay}_cooling"
+			hm.OperatingState_DayWeekago_heating = hm."OperatingState_Day${hm.currentDay}_heating"
+			hm.OperatingState_DayWeekago_idle = hm."OperatingState_Day${hm.currentDay}_idle"
+			hm.OperatingState_DayWeekago_fanonly = hm."OperatingState_Day${hm.currentDay}_fanonly"
+			hm.FanMode_DayWeekago_On = hm."FanMode_Day${hm.currentDay}_On"
+			hm.FanMode_DayWeekago_auto = hm."FanMode_Day${hm.currentDay}_auto"
+			hm."OperatingState_Day${hm.currentDay}_cooling" = 0L
+			hm."OperatingState_Day${hm.currentDay}_heating" = 0L
+			hm."OperatingState_Day${hm.currentDay}_idle" = 0L
+			hm."OperatingState_Day${hm.currentDay}_fanonly" = 0L
+			hm."FanMode_Day${hm.currentDay}_On" = 0L
+			hm."FanMode_Day${hm.currentDay}_auto" = 0L
 
-		def t1 = hm["OperatingState_Month${hm.currentMonth}_cooling"]?.toInteger() ?: 0L
-		hm."OperatingState_Month${hm.currentMonth}_cooling" = t1 + Op_coolingusage
-		t1 = hm["OperatingState_Month${hm.currentMonth}_heating"]?.toInteger() ?: 0L
-		hm."OperatingState_Month${hm.currentMonth}_heating" = t1 + Op_heatingusage
-		t1 = hm["OperatingState_Month${hm.currentMonth}_idle"]?.toInteger() ?: 0L
-		hm."OperatingState_Month${hm.currentMonth}_idle" = t1 + Op_idle
-		t1 = hm["OperatingState_Month${hm.currentMonth}_fanonly"]?.toInteger() ?: 0L
-		hm."OperatingState_Month${hm.currentMonth}_fanonly" = t1 + Op_fanonly
-		t1 = hm["FanMode_Month${hm.currentMonth}_On"]?.toInteger() ?: 0L
-		hm."FanMode_Month${hm.currentMonth}_On" = t1 + fan_on
-		t1 = hm["FanMode_Month${hm.currentMonth}_auto"]?.toInteger() ?: 0L
-		hm."FanMode_Month${hm.currentMonth}_auto" = t1 + fan_auto
+			long t1 = hm?."OperatingState_Month${hm.currentMonth}_cooling"?.toInteger() ?: 0L
+			hm."OperatingState_Month${hm.currentMonth}_cooling" = t1 + Op_coolingusage
+			t1 = hm?."OperatingState_Month${hm.currentMonth}_heating"?.toInteger() ?: 0L
+			hm."OperatingState_Month${hm.currentMonth}_heating" = t1 + Op_heatingusage
+			t1 = hm?."OperatingState_Month${hm.currentMonth}_idle"?.toInteger() ?: 0L
+			hm."OperatingState_Month${hm.currentMonth}_idle" = t1 + Op_idle
+			t1 = hm?."OperatingState_Month${hm.currentMonth}_fanonly"?.toInteger() ?: 0L
+			hm."OperatingState_Month${hm.currentMonth}_fanonly" = t1 + Op_fanonly
+			t1 = hm?."FanMode_Month${hm.currentMonth}_On"?.toInteger() ?: 0L
+			hm."FanMode_Month${hm.currentMonth}_On" = t1 + fan_on
+			t1 = hm?."FanMode_Month${hm.currentMonth}_auto"?.toInteger() ?: 0L
+			hm."FanMode_Month${hm.currentMonth}_auto" = t1 + fan_auto
 
-		if(monthChange) {
-			hm.currentMonth = monthNum
-			hm.OperatingState_MonthYearago_cooling = hm."OperatingState_Month${hm.currentMonth}_cooling"
-			hm.OperatingState_MonthYearago_heating = hm."OperatingState_Month${hm.currentMonth}_heating"
-			hm.OperatingState_MonthYearago_idle = hm."OperatingState_Month${hm.currentMonth}_idle"
-			hm.OperatingState_MonthYearago_fanonly = hm."OperatingState_Month${hm.currentMonth}_fanonly"
-			hm.FanMode_MonthYearago_On = hm."FanMode_Month${hm.currentMonth}_On"
-			hm.FanMode_MonthYearago_auto = hm."FanMode_Month${hm.currentMonth}_auto"
-			hm."OperatingState_Month${hm.currentMonth}_cooling" = 0L
-			hm."OperatingState_Month${hm.currentMonth}_heating" = 0L
-			hm."OperatingState_Month${hm.currentMonth}_idle" = 0L
-			hm."FanMode_Month${hm.currentMonth}_On" = 0L
-			hm."FanMode_Month${hm.currentMonth}_auto" = 0L
+			if(monthChange) {
+				hm.currentMonth = monthNum
+				hm.OperatingState_MonthYearago_cooling = hm."OperatingState_Month${hm.currentMonth}_cooling"
+				hm.OperatingState_MonthYearago_heating = hm."OperatingState_Month${hm.currentMonth}_heating"
+				hm.OperatingState_MonthYearago_idle = hm."OperatingState_Month${hm.currentMonth}_idle"
+				hm.OperatingState_MonthYearago_fanonly = hm."OperatingState_Month${hm.currentMonth}_fanonly"
+				hm.FanMode_MonthYearago_On = hm."FanMode_Month${hm.currentMonth}_On"
+				hm.FanMode_MonthYearago_auto = hm."FanMode_Month${hm.currentMonth}_auto"
+				hm."OperatingState_Month${hm.currentMonth}_cooling" = 0L
+				hm."OperatingState_Month${hm.currentMonth}_heating" = 0L
+				hm."OperatingState_Month${hm.currentMonth}_idle" = 0L
+				hm."FanMode_Month${hm.currentMonth}_On" = 0L
+				hm."FanMode_Month${hm.currentMonth}_auto" = 0L
+			}
+
+			t1 = hm?.OperatingState_thisYear_cooling?.toInteger() ?: 0L
+			hm.OperatingState_thisYear_cooling = t1 + Op_coolingusage
+			t1 = hm?.OperatingState_thisYear_heating?.toInteger() ?: 0L
+			hm.OperatingState_thisYear_heating = t1 + Op_heatingusage
+			t1 = hm?.OperatingState_thisYear_idle?.toInteger() ?: 0L
+			hm.OperatingState_thisYear_idle = t1 + Op_idle
+			t1 = hm?.OperatingState_thisYear_fanonly?.toInteger() ?: 0L
+			hm.OperatingState_thisYear_fanonly = t1 + Op_fanonly
+			t1 = hm?.FanMode_thisYear_On?.toInteger() ?: 0L
+			hm.FanMode_thisYear_On = t1 + fan_on
+			t1 = hm?.FanMode_thisYear_auto?.toInteger() ?: 0L
+			hm.FanMode_thisYear_auto = t1 + fan_auto
+
+			if(yearChange) {
+				hm.currentYear = yearNum
+				hm.OperatingState_lastYear_cooling = hm.OperatingState_thisYear_cooling
+				hm.OperatingState_lastYear_heating = hm.OperatingState_thisYear_heating
+				hm.OperatingState_lastYear_idle = hm.OperatingState_thisYear_idle
+				hm.OperatingState_lastYear_fanonly = hm.OperatingState_thisYear_fanonly
+				hm.FanMode_lastYear_On = hm.FanMode_thisYear_On
+				hm.FanMode_lastYear_auto = hm.FanMode_thisYear_auto
+	
+				hm.OperatingState_thisYear_cooling = 0L
+				hm.OperatingState_thisYear_heating = 0L
+				hm.OperatingState_thisYear_idle = 0L
+				hm.OperatingState_thisYear_fanonly = 0L
+				hm.FanMode_thisYear_On = 0L
+				hm.FanMode_thisYear_auto = 0L
+			}
+			state.historyStoreMap = hm
+
+		} catch (ex) {
+			state.eric = 0 // force clear of stats
+			state.remove("historyStoreMap")
+			log.error "updateOperatingHistory Exception:", ex
 		}
-
-		t1 = hm[OperatingState_thisYear_cooling]?.toInteger() ?: 0L
-		hm.OperatingState_thisYear_cooling = t1 + Op_coolingusage
-		t1 = hm[OperatingState_thisYear_heating]?.toInteger() ?: 0L
-		hm.OperatingState_thisYear_heating = t1 + Op_heatingusage
-		t1 = hm[OperatingState_thisYear_idle]?.toInteger() ?: 0L
-		hm.OperatingState_thisYear_idle = t1 + Op_idle
-		t1 = hm[OperatingState_thisYear_fanonly]?.toInteger() ?: 0L
-		hm.OperatingState_thisYear_fanonly = t1 + Op_fanonly
-		t1 = hm[FanMode_thisYear_On]?.toInteger() ?: 0L
-		hm.FanMode_thisYear_On = t1 + fan_on
-		t1 = hm[FanMode_thisYear_auto]?.toInteger() ?: 0L
-		hm.FanMode_thisYear_auto = t1 + fan_auto
-
-		if(yearChange) {
-			hm.currentYear = yearNum
-			hm.OperatingState_lastYear_cooling = hm.OperatingState_thisYear_cooling
-			hm.OperatingState_lastYear_heating = hm.OperatingState_thisYear_heating
-			hm.OperatingState_lastYear_idle = hm.OperatingState_thisYear_idle
-			hm.OperatingState_lastYear_fanonly = hm.OperatingState_thisYear_fanonly
-			hm.FanMode_lastYear_On = hm.FanMode_thisYear_On
-			hm.FanMode_lastYear_auto = hm.FanMode_thisYear_auto
-
-			hm.OperatingState_thisYear_cooling = 0L
-			hm.OperatingState_thisYear_heating = 0L
-			hm.OperatingState_thisYear_idle = 0L
-			hm.OperatingState_thisYear_fanonly = 0L
-			hm.FanMode_thisYear_On = 0L
-			hm.FanMode_thisYear_auto = 0L
-		}
-		state.historyStoreMap = hm
 	}
 }
 
 def getSumUsage(table, String strtyp) {
 	//log.trace "getSumUsage...$strtyp Table size: ${table?.size()}"
-	def totseconds = 0L
-	def newseconds = 0L
+	long totseconds = 0L
+	long newseconds = 0L
 
 	def hr
 	def mins
@@ -2903,7 +2884,7 @@ def getSumUsage(table, String strtyp) {
 	}
 	//log.info "$strtyp totseconds: $totseconds"
 
-	return totseconds.toInteger()
+	return totseconds
 }
 
 def initHistoryStore() {
@@ -3073,12 +3054,12 @@ def getHistoryStore() {
 	}
 	def hm = thm.clone()
 
-	def Op_coolingusage = getSumUsage(state.operatingStateTable, "cooling").toInteger()
-	def Op_heatingusage = getSumUsage(state.operatingStateTable, "heating").toInteger()
-	def Op_idle = getSumUsage(state.operatingStateTable, "idle").toInteger()
-	def Op_fanonly = getSumUsage(state.operatingStateTable, "fan only").toInteger()
-	def fan_on = getSumUsage(state.fanModeTable, "on").toInteger()
-	def fan_auto = getSumUsage(state.fanModeTable, "auto").toInteger()
+	long Op_coolingusage = getSumUsage(state.operatingStateTable, "cooling")
+	long Op_heatingusage = getSumUsage(state.operatingStateTable, "heating")
+	long Op_idle = getSumUsage(state.operatingStateTable, "idle")
+	long Op_fanonly = getSumUsage(state.operatingStateTable, "fan only")
+	long fan_on = getSumUsage(state.fanModeTable, "on")
+	long fan_auto = getSumUsage(state.fanModeTable, "auto")
 
 	//log.info "fanon ${fan_on}  fanauto: ${fan_auto} opidle: ${Op_idle}  cool: ${Op_coolingusage} heat: ${Op_heatingusage}"
 	//log.debug "currentDay ${hm.currentDay} | currentMonth ${hm.currentMonth}  | currentYear: ${hm.currentYear}"
@@ -3090,30 +3071,30 @@ def getHistoryStore() {
 	hm."FanMode_Day${hm.currentDay}_On" = fan_on
 	hm."FanMode_Day${hm.currentDay}_auto" = fan_auto
 
-	def t1 = hm["OperatingState_Month${hm.currentMonth}_cooling"]?.toInteger() ?: 0L
+	long t1 = hm?."OperatingState_Month${hm.currentMonth}_cooling"?.toInteger() ?: 0L
 	hm."OperatingState_Month${hm.currentMonth}_cooling" = t1 + Op_coolingusage
-	t1 = hm["OperatingState_Month${hm.currentMonth}_heating"]?.toInteger() ?: 0L
+	t1 = hm?."OperatingState_Month${hm.currentMonth}_heating"?.toInteger() ?: 0L
 	hm."OperatingState_Month${hm.currentMonth}_heating" = t1 + Op_heatingusage
-	t1 = hm["OperatingState_Month${hm.currentMonth}_idle"]?.toInteger() ?: 0L
+	t1 = hm?."OperatingState_Month${hm.currentMonth}_idle"?.toInteger() ?: 0L
 	hm."OperatingState_Month${hm.currentMonth}_idle" = t1 + Op_idle
-	t1 = hm["OperatingState_Month${hm.currentMonth}_fanonly"]?.toInteger() ?: 0L
+	t1 = hm?."OperatingState_Month${hm.currentMonth}_fanonly"?.toInteger() ?: 0L
 	hm."OperatingState_Month${hm.currentMonth}_fanonly" = t1 + Op_fanonly
-	t1 = hm["FanMode_Month${hm.currentMonth}_On"]?.toInteger() ?: 0L
+	t1 = hm?."FanMode_Month${hm.currentMonth}_On"?.toInteger() ?: 0L
 	hm."FanMode_Month${hm.currentMonth}_On" = t1 + fan_on
-	t1 = hm["FanMode_Month${hm.currentMonth}_auto"]?.toInteger() ?: 0L
+	t1 = hm?."FanMode_Month${hm.currentMonth}_auto"?.toInteger() ?: 0L
 	hm."FanMode_Month${hm.currentMonth}_auto" = t1 + fan_auto
 
-	t1 = hm[OperatingState_thisYear_cooling]?.toInteger() ?: 0L
+	t1 = hm?.OperatingState_thisYear_cooling?.toInteger() ?: 0L
 	hm.OperatingState_thisYear_cooling = t1 + Op_coolingusage
-	t1 = hm[OperatingState_thisYear_heating]?.toInteger() ?: 0L
+	t1 = hm?.OperatingState_thisYear_heating?.toInteger() ?: 0L
 	hm.OperatingState_thisYear_heating = t1 + Op_heatingusage
-	t1 = hm[OperatingState_thisYear_idle]?.toInteger() ?: 0L
+	t1 = hm?.OperatingState_thisYear_idle?.toInteger() ?: 0L
 	hm.OperatingState_thisYear_idle = t1 + Op_idle
-	t1 = hm[OperatingState_thisYear_fanonly]?.toInteger() ?: 0L
+	t1 = hm?.OperatingState_thisYear_fanonly?.toInteger() ?: 0L
 	hm.OperatingState_thisYear_fanonly = t1 + Op_fanonly
-	t1 = hm[FanMode_thisYear_On]?.toInteger() ?: 0L
+	t1 = hm?.FanMode_thisYear_On?.toInteger() ?: 0L
 	hm.FanMode_thisYear_On = t1 + fan_on
-	t1 = hm[FanMode_thisYear_auto]?.toInteger() ?: 0L
+	t1 = hm?.FanMode_thisYear_auto?.toInteger() ?: 0L
 	hm.FanMode_thisYear_auto = t1 + fan_auto
 
 	return hm
@@ -3188,7 +3169,7 @@ def getIntListAvg(itemList) {
 	def iCnt = itemList?.size()
 	if(iCnt >= 1) {
 		if(iCnt > 1) {
-			avgRes = (itemList?.sum().toDouble() / iCnt.toDouble()).round(0) //
+			avgRes = (itemList?.sum().toDouble() / iCnt.toDouble()).round(0)
 		} else { itemList?.each { avgRes = avgRes + it.toInteger() } }
 	}
 	//log.debug "[getIntListAvg] avgRes: $avgRes"
@@ -3197,10 +3178,10 @@ def getIntListAvg(itemList) {
 
 def secToTimeMap(long seconds) {
 	long sec = (seconds % 60) ?: 0L
-	long minutes = ((seconds % 3600) / 60) ?: 0L //
-	long hours = ((seconds % 86400) / 3600) ?: 0L //
-	long days = (seconds / 86400) ?: 0L //
-	long years = (days / 365) ?: 0L //
+	long minutes = ((seconds % 3600) / 60) ?: 0L
+	long hours = ((seconds % 86400) / 3600) ?: 0L
+	long days = (seconds / 86400) ?: 0L
+	long years = (days / 365) ?: 0L
 	def res = ["m":minutes, "h":hours, "d":days, "y":years]
 	return res
 }
@@ -3280,7 +3261,7 @@ def getChgLogHtml() {
 	if(!state?.shownChgLog == true) {
 		chgStr = """
 			<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
-			<script src="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/js/vex.combined.min.js"></script>
+			<script src="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.1/js/vex.combined.min.js"></script>
 			<script>
 				\$(document).ready(function() {
 				    vex.dialog.alert({
@@ -3315,7 +3296,7 @@ def getGraphHTML() {
 		def canHeat = state?.can_heat == true ? true : false
 		def canCool = state?.can_cool == true ? true : false
 		def hasFan = state?.has_fan == true ? true : false
-		def leafImg = state?.hasLeaf ? getFileBase64(getImg("nest_leaf_on.gif"), "image", "gif") : getFileBase64(getImg("nest_leaf_off.gif"), "image","gif")
+		def leafImg = state?.hasLeaf ? getImg("nest_leaf_on.gif") : getImg("nest_leaf_off.gif")
 		def updateAvail = !state.updateAvailable ? "" : """<div class="greenAlertBanner">Device Update Available!</div>"""
 		def clientBl = state?.clientBl ? """<div class="brightRedAlertBanner">Your Manager client has been blacklisted!\nPlease contact the Nest Manager developer to get the issue resolved!!!</div>""" : ""
 
@@ -3336,8 +3317,7 @@ def getGraphHTML() {
 
 		def timeToTarget = device.currentState("timeToTarget").stringValue
 		def sunCorrectStr = state?.sunCorrectEnabled ? "Enabled (${state?.sunCorrectActive == true ? "Active" : "Inactive"})" : "Disabled"
-		def refreshBtnHtml = state.mobileClientType == "ios" ?
-				"""<div class="pageFooterBtn"><button type="button" class="btn btn-info pageFooterBtn" onclick="reloadTstatPage()"><span>&#10227;</span> Refresh</button></div>""" : ""
+		def refreshBtnHtml = state.mobileClientType == "ios" ? """<div class="pageFooterCls"><p class="slideFooterText">Swipe/Tap to Change Slide</p><button type="button" class="btn btn-info slideFooterBtn" onclick="reloadPage()"><span>&#10227;</span> Refresh</button></div>""" : ""
 		def chartHtml = (
 				state?.showGraphs &&
 				state?.temperatureTable?.size() > 0 &&
@@ -3441,15 +3421,15 @@ def getGraphHTML() {
 				<meta http-equiv="pragma" content="no-cache"/>
 				<meta name="viewport" content="width = device-width, user-scalable=no, initial-scale=1.0">
 
-				<link rel="stylesheet prefetch" href="${getCssData()}"/>
-				<link rel="stylesheet" href="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/Swiper/3.4.1/css/swiper.min.css", "text", "css")}" />
-				<link rel="stylesheet" href="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex.min.css", "text", "css")}" />
-				<link rel="stylesheet" href="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex-theme-top.min.css", "text", "css")}" />
-
-				<script type="text/javascript" src="${getChartJsData()}"></script>
-				<script src="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/Swiper/3.4.1/js/swiper.min.js", "text", "javascript")}"></script>
-				<script src="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js", "text", "javascript")}"></script>
+				<link rel="stylesheet" type="text/css" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/ST-HTML.min.css"/>
+				<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/3.4.2/css/swiper.min.css" />
+				<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.1/css/vex.min.css" async/>
+				<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.1/css/vex-theme-top.min.css" async />
+				<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+				<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+				<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/3.4.2/js/swiper.min.js"></script>
 				<style>
+					
 				</style>
 			</head>
 			<body>
@@ -3534,10 +3514,7 @@ def getGraphHTML() {
 					</div>
 					<!-- If we need pagination -->
 					<div class="swiper-pagination"></div>
-
-					<div style="text-align: center;">
-						<p class="slideFooterMsg">Swipe-Tap to Change Slide</p>
-					</div>
+					<div style="text-align: center; padding: 25px 0;"></div>
 				</div>
 				<script>
 					var mySwiper = new Swiper ('.swiper-container', {
@@ -3573,10 +3550,8 @@ def getGraphHTML() {
 						pagination: '.swiper-pagination',
 						paginationHide: false,
 						paginationClickable: true
-					})
-					function reloadTstatPage() {
-						// var url = "https://" + window.location.host + "/api/devices/${device?.getId()}/graphHTML"
-						// window.location = url;
+					});
+					function reloadPage() {
 						window.location.reload();
 					}
 				</script>
@@ -3588,7 +3563,7 @@ def getGraphHTML() {
 		render contentType: "text/html", data: html, status: 200
 	} catch (ex) {
 		log.error "graphHTML Exception:", ex
-		exceptionDataHandler(ex.message, "graphHTML")
+		exceptionDataHandler(ex?.message, "graphHTML")
 	}
 }
 
@@ -3784,11 +3759,10 @@ def getDeviceTile(devNum) {
 						${chartHtml}
 					</div>
 					<!-- If we need pagination -->
-					<div class="swiper-pagination"></div>
-
-					<div style="text-align: center;">
-						<p class="slideFooterMsg">Swipe/Drag to Change Slide</p>
+					<div style="text-align: center; padding: 20px;">
+						<p class="slideFooterTextTile">Swipe/Drag to Change Slide</p>
 					</div>
+					<div class="swiper-pagination"></div>
 				</div>
 			</div>
 			<script>
@@ -3799,10 +3773,10 @@ def getDeviceTile(devNum) {
 					loop: false,
 					slidesPerView: '1',
 					centeredSlides: true,
-					spaceBetween: 200,
+					spaceBetween: 100,
 					autoHeight: true,
 					keyboardControl: true,
-        			mousewheelControl: true,
+					mousewheelControl: true,
 					iOSEdgeSwipeDetection: true,
 					iOSEdgeSwipeThreshold: 20,
 					parallax: true,
@@ -3810,11 +3784,11 @@ def getDeviceTile(devNum) {
 
 					effect: 'coverflow',
 					coverflow: {
-					  rotate: 50,
-					  stretch: 0,
-					  depth: 100,
-					  modifier: 1,
-					  slideShadows : true
+						rotate: 50,
+						stretch: 0,
+						depth: 100,
+						modifier: 1,
+						slideShadows : true
 					},
 					onTap: function(s, e) {
 						s.slideNext(false);
@@ -3825,10 +3799,8 @@ def getDeviceTile(devNum) {
 					pagination: '.swiper-pagination',
 					paginationHide: false,
 					paginationClickable: true
-				})
+				});
 				function reloadTstatPage() {
-					// var url = "https://" + window.location.host + "/api/devices/${device?.getId()}/graphHTML"
-					// window.location = url;
 					window.location.reload();
 				}
 			</script>
@@ -3836,7 +3808,7 @@ def getDeviceTile(devNum) {
 		render contentType: "text/html", data: html, status: 200
 	} catch (ex) {
 		log.error "getDeviceTile Exception:", ex
-		exceptionDataHandler(ex.message, "getDeviceTile")
+		exceptionDataHandler(ex?.message, "getDeviceTile")
 	}
 }
 
@@ -3942,12 +3914,12 @@ def showChartHtml(devNum="") {
 //TODO fix for fanonly
 	grpUseData?.each { mon ->
 		def data = mon?.value
-		def heat = data?.heating ? (data?.heating?.tSec.toLong()/3600).toDouble().round(0) : 0 //
-		def cool = data?.cooling ? (data?.cooling?.tSec.toLong()/3600).toDouble().round(0) : 0 //
-		def idle = data?.idle ? (data?.idle?.tSec.toLong()/3600).toDouble().round(0) : 0 //
-		def fanonly = data?.fanonly ? (data?.fanonly?.tSec.toLong()/3600).toDouble().round(0) : 0 //
-		def fanOn = data?.fanOn ? (data?.fanOn?.tSec.toLong()/3600).toDouble().round(0) : 0 //
-		def fanAuto = data?.fanAuto ? (data?.fanAuto?.tSec.toLong()/3600).toDouble().round(0) : 0 //
+		def heat = data?.heating ? (data?.heating?.tSec.toLong()/3600).toDouble().round(0) : 0
+		def cool = data?.cooling ? (data?.cooling?.tSec.toLong()/3600).toDouble().round(0) : 0
+		def idle = data?.idle ? (data?.idle?.tSec.toLong()/3600).toDouble().round(0) : 0
+		def fanonly = data?.fanonly ? (data?.fanonly?.tSec.toLong()/3600).toDouble().round(0) : 0
+		def fanOn = data?.fanOn ? (data?.fanOn?.tSec.toLong()/3600).toDouble().round(0) : 0
+		def fanAuto = data?.fanAuto ? (data?.fanAuto?.tSec.toLong()/3600).toDouble().round(0) : 0
 		def mName = getMonthNumToStr(mon?.key)
 		lStr += "\n$mName Usage - Idle: ($idle) | Heat: ($heat) | Cool: ($cool) | Fanonly: (${fanonly}) FanOn: ($fanOn) | FanAuto: ($fanAuto)"
 		def iNum = 1
@@ -4096,12 +4068,16 @@ def showChartHtml(devNum="") {
 					seriesType: 'bars',
 					colors: ['#FF9900', '#0066FF', '#884ae5'],
 					chartArea: {
-					  left: '15%',
-					  right: '23%',
+					  left: '10%',
+					  right: '5%',
 					  top: '7%',
 					  bottom: '10%',
-					  height: '100%',
-					  width: '90%'
+					  height: '95%',
+					  width: '100%'
+					},
+					legend: {
+						position: 'bottom',
+						maxLines: 4
 					}
 				};
 
@@ -4127,7 +4103,6 @@ def showChartHtml(devNum="") {
 			</section>
   		  </div>
 	  """
-/* */
 	return data
 }
 
@@ -4184,7 +4159,7 @@ def getDayTimePerc(val,data) {
 	//log.debug "getDayTimePerc($val, $data)"
 	//log.debug "getDayElapSec: ${getDayElapSec()}"
 	if(!data) { return null }
-	return (int) ((val.toInteger()/getDayElapSec())*100).toDouble().round(0) //
+	return (int) ((val.toInteger()/getDayElapSec())*100).toDouble().round(0)
 }
 
 def getDayElapSec() {
@@ -4195,7 +4170,7 @@ def getDayElapSec() {
 	c.set(Calendar.SECOND, 0);
 	c.set(Calendar.MILLISECOND, 0);
 	long passed = now - c.getTimeInMillis();
-	return (long) passed / 1000; //
+	return (long) passed / 1000
 }
 
 def getTimeMapString(data) {
@@ -4302,7 +4277,7 @@ def getExtTempVoiceDesc() {
 
 private adj_temp(tempF) {
 	if(getTemperatureScale() == "C") {
-		return (tempF - 32) * 5/9 as Double //
+		return (tempF - 32) * 5/9 as Double
 	} else {
 		return tempF
 	}
